@@ -4,10 +4,9 @@ import {
   IsString,
   MaxLength,
 } from 'class-validator';
-
 import { Transform } from 'class-transformer';
 
-export class ResendVerificationDto {
+export class ResendOtpDto {
   @Transform(({ value }) =>
     typeof value === 'string' ? value.trim().toLowerCase() : value,
   )

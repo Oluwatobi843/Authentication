@@ -1,15 +1,13 @@
-
 import {
-  IsNotEmpty,
   IsString,
   Matches,
 } from 'class-validator';
+import { ResendOtpDto } from './resend-otp.dto.js';
 
-export class VerifyEmailDto {
+export class VerifyOtpDto extends ResendOtpDto {
   @IsString()
-  @IsNotEmpty()
-  @Matches(/^[a-fA-F0-9]{64}$/, {
-    message: 'Verification token must be a valid 64-character hexadecimal string',
+  @Matches(/^\d{6}$/, {
+    message: 'OTP must be exactly six digits',
   })
-  token: string;
+  otp: string;
 }

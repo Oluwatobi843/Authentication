@@ -45,20 +45,20 @@ export class User {
   })
   status: UserStatus;
 
-  // Email verification
-  @Column({ type: 'boolean', default: false })
-  emailVerified: boolean;
+// Email verification
+@Column({ type: 'boolean', default: false })
+emailVerified: boolean;
 
-  @Column({
-    type: 'varchar',
-    length: 255,
-    nullable: true,
-    select: false,
-  })
-  emailVerificationToken: string | null;
+@Column({
+  type: 'varchar',
+  length: 64,
+  nullable: true,
+  select: false,
+})
+emailVerificationOtpHash: string | null;
 
-  @Column({ type: 'timestamp', nullable: true })
-  emailVerificationExpiresAt: Date | null;
+@Column({ type: 'timestamp', nullable: true })
+emailVerificationExpiresAt: Date | null;
 
   @Column({
     type: 'varchar',
