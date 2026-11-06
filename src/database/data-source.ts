@@ -2,7 +2,7 @@
 import 'reflect-metadata';
 import { config } from 'dotenv';
 import { DataSource } from 'typeorm';
-import { User } from '../users/entities/user.entity.js';
+import { User } from '../user-profile/entities/user.entity.js';
 
 config();
 

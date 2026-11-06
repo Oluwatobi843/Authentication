@@ -6,7 +6,7 @@ import { AuthController } from './auth.controller.js';
 import { AuthService } from './auth.service.js';
 import { JwtStrategy } from './strategies/jwt.strategy.js';
 
-import { UsersModule } from '../users/users.module.js';
+import { UsersModule } from '../user-profile/users.module.js';
 import { EmailModule } from '../common/email/email.module.js';
 
 @Module({

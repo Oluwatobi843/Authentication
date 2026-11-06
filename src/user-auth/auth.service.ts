@@ -11,10 +11,10 @@ import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { LoginDto } from './dto/login.dto.js';
 
-import { UsersService } from '../users/users.service.js';
+import { UsersService } from '../user-profile/users.service.js';
 import { RegisterDto } from './dto/register.dto.js';
-import { UserRole } from '../users/enums/user-role.enum.js';
-import { UserStatus } from '../users/enums/user-status.enum.js';
+import { UserRole } from '../user-profile/enums/user-role.enum.js';
+import { UserStatus } from '../user-profile/enums/user-status.enum.js';
 // import { createHash } from 'crypto';
 import { VerifyEmailDto } from './dto/verify-email.dto.js';
 import { EmailService } from '../common/email/email.service.js';
@@ -410,6 +410,7 @@ async refresh(refreshTokenDto: RefreshTokenDto) {
     },
   };
 }
+
 
 async forgotPassword(forgotPasswordDto: ForgotPasswordDto) {
   const user = await this.usersService.findByEmail(
