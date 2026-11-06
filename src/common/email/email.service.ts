@@ -144,4 +144,47 @@ export class EmailService {
       );
     }
   }
+
+  async sendEmailChangeVerificationEmail(
+    newEmail: string,
+    otp: string,
+  ): Promise<void> {
+    try {
+      await this.transporter.sendMail({
+        from: this.configService.getOrThrow<string>('MAIL_FROM'),
+        to: newEmail,
+        subject: 'Confirm Your New Email Address',
+        text: `
+          You requested to change your account email address.
+
+          Your email-change verification OTP is: ${otp}
+
+          This OTP expires in 10 minutes.
+
+          If you did not request this change, please ignore this email.
+        `,
+        html: `
+          <h2>Confirm Your New Email Address</h2>
+          <p>You requested to change your account email address.</p>
+          <p>Use the six-digit OTP below to verify your new email address:</p>
+          <h3>${otp}</h3>
+          <p>This OTP expires in 10 minutes.</p>
+          <p>If you did not request this change, please ignore this email.</p>
+        `,
+      });
+
+      this.logger.log(
+        `Email-change verification sent to ${newEmail}`,
+      );
+    } catch (error) {
+      this.logger.error(
+        'Failed to send email-change verification',
+        error,
+      );
+
+      throw new InternalServerErrorException(
+        'Unable to send email-change verification. Please try again later.',
+      );
+    }
+  }
 }

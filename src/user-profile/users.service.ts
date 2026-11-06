@@ -4,22 +4,33 @@ import {
   BadRequestException,
   NotFoundException,
   UnauthorizedException,
+  ConflictException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import * as bcrypt from 'bcrypt';
+import {
+  randomInt,
+  createHash,
+  timingSafeEqual,
+} from 'node:crypto';
 
 import { User } from '../user-auth/entities/user.entity.js';
 import type { UserResponse } from '../user-auth/interfaces/user.interface.js';
+import { EmailService } from '../common/email/email.service.js';
 
 import { UpdateProfileDto } from './dto/update-profile.dto.js';
 import { ChangePasswordDto } from './dto/change-password.dto.js';
+import { ChangeProfileEmailDto } from './dto/change-profile-email.dto.js';
+import { VerifyEmailChangeDto } from './dto/verify-email-change.dto.js';
 
 @Injectable()
 export class UsersService {
   constructor(
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
+
+    private readonly emailService: EmailService,
   ) {}
 
   async findByEmail(email: string): Promise<User | null> {
@@ -178,6 +189,161 @@ export class UsersService {
     return {
       message: 'Password changed successfully. Please log in again.',
     };
+  }
+
+  // Request email address change
+  async requestEmailChange(
+    userId: string,
+    dto: ChangeProfileEmailDto,
+  ): Promise<{ message: string }> {
+    const user = await this.userRepository
+      .createQueryBuilder('user')
+      .addSelect('user.password')
+      .where('user.id = :userId', { userId })
+      .getOne();
+
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    const isPasswordValid = await bcrypt.compare(
+      dto.currentPassword,
+      user.password,
+    );
+
+    if (!isPasswordValid) {
+      throw new UnauthorizedException(
+        'Current password is incorrect',
+      );
+    }
+
+    const newEmail = dto.newEmail.trim().toLowerCase();
+
+    if (newEmail === user.email.toLowerCase()) {
+      throw new BadRequestException(
+        'New email must be different from your current email',
+      );
+    }
+
+    const existingUser = await this.findByEmail(newEmail);
+
+    if (existingUser && existingUser.id !== user.id) {
+      throw new ConflictException(
+        'This email address is already in use',
+      );
+    }
+
+    // Generate a six-digit OTP
+    const otp = randomInt(100000, 1000000).toString();
+
+    // Store only the SHA-256 hash
+    const otpHash = createHash('sha256')
+      .update(otp)
+      .digest('hex');
+
+    user.pendingEmail = newEmail;
+    user.emailChangeOtpHash = otpHash;
+    user.emailChangeOtpExpiresAt = new Date(
+      Date.now() + 10 * 60 * 1000,
+    );
+
+    await this.userRepository.save(user);
+
+    // Send OTP to the new email address
+    await this.emailService.sendEmailChangeVerificationEmail(
+      newEmail,
+      otp,
+    );
+
+    return {
+      message:
+        'Email-change verification code sent to your new email address.',
+    };
+  }
+
+  // Verify OTP and complete email address change
+  async verifyEmailChange(
+    userId: string,
+    dto: VerifyEmailChangeDto,
+  ): Promise<UserResponse> {
+    const user = await this.userRepository
+      .createQueryBuilder('user')
+      .addSelect('user.emailChangeOtpHash')
+      .where('user.id = :userId', { userId })
+      .getOne();
+
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    if (
+      !user.pendingEmail ||
+      !user.emailChangeOtpHash ||
+      !/^[a-f0-9]{64}$/i.test(user.emailChangeOtpHash)
+    ) {
+      throw new ConflictException(
+        'Invalid or expired email-change OTP',
+      );
+    }
+
+    if (
+      !user.emailChangeOtpExpiresAt ||
+      user.emailChangeOtpExpiresAt.getTime() <= Date.now()
+    ) {
+      throw new ConflictException(
+        'Invalid or expired email-change OTP',
+      );
+    }
+
+    const submittedOtpHash = createHash('sha256')
+      .update(dto.otp)
+      .digest('hex');
+
+    const storedHash = Buffer.from(
+      user.emailChangeOtpHash,
+      'hex',
+    );
+
+    const submittedHash = Buffer.from(
+      submittedOtpHash,
+      'hex',
+    );
+
+    if (
+      storedHash.length !== submittedHash.length ||
+      !timingSafeEqual(storedHash, submittedHash)
+    ) {
+      throw new ConflictException(
+        'Invalid or expired email-change OTP',
+      );
+    }
+
+    // Check availability again before committing the change
+    const existingUser = await this.findByEmail(
+      user.pendingEmail,
+    );
+
+    if (existingUser && existingUser.id !== user.id) {
+      throw new ConflictException(
+        'This email address is already in use',
+      );
+    }
+
+    user.email = user.pendingEmail;
+    user.emailVerified = true;
+
+    // Clear temporary email-change verification data
+    user.pendingEmail = null;
+    user.emailChangeOtpHash = null;
+    user.emailChangeOtpExpiresAt = null;
+
+    // Invalidate the existing refresh-token session
+    user.refreshTokenHash = null;
+    user.refreshTokenExpiresAt = null;
+
+    const updatedUser = await this.userRepository.save(user);
+
+    return this.toUserResponse(updatedUser);
   }
 
   // Return only safe user information
