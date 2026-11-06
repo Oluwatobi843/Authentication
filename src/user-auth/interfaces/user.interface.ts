@@ -1,4 +1,3 @@
-
 import { UserRole } from '../enums/user-role.enum.js';
 
 export type TokenPurpose =
@@ -12,11 +11,10 @@ export interface JwtPayload {
   sub: string;
   email: string;
   role: UserRole;
-  type?: TokenPurpose;
-  version?: number;
-  jti?: string;
+  type: TokenPurpose;
   iat?: number;
   exp?: number;
+  jti?: string;
 }
 
 export interface AuthenticatedUser {

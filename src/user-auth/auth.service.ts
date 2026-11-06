@@ -1,6 +1,7 @@
-
 import {
+  BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   UnauthorizedException,
 } from '@nestjs/common';
@@ -24,15 +25,32 @@ import { EmailService } from '../common/email/email.service.js';
 
 import { UserRole } from './enums/user-role.enum.js';
 import { UserStatus } from './enums/user-status.enum.js';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+
+import { UserInvitation } from './entities/user-invitation.entity.js';
+import { InvitationStatus } from './enums/invitation-status.enum.js';
+
+import { InvitationHelper } from './helpers/invitation.helper.js';
+
+import { InviteUserDto } from './dto/invite-user.dto.js';
+import { VerifyInvitationDto } from './dto/verify-invitation.dto.js';
+import { AcceptInvitationDto } from './dto/accept-invitation.dto.js';
 
 @Injectable()
 export class AuthService {
   constructor(
-    private readonly usersService: UsersService,
-    private readonly emailService: EmailService,
-    private readonly jwtService: JwtService,
-    private readonly configService: ConfigService,
-  ) {}
+  private readonly usersService: UsersService,
+  private readonly emailService: EmailService,
+  private readonly jwtService: JwtService,
+  private readonly configService: ConfigService,
+  private readonly invitationHelper: InvitationHelper,
+
+  @InjectRepository(UserInvitation)
+  private readonly invitationRepository: Repository<UserInvitation>,
+) {}
+
+
 
 //  Register
 
@@ -499,6 +517,223 @@ export class AuthService {
         'Password reset successful. Please log in with your new password.',
     };
   }
+
+  
+  // Invite User
+  async inviteUser(inviterId: string, inviteUserDto: InviteUserDto) {
+    // Retrieve the user sending the invitation
+    const inviter = await this.usersService.findById(inviterId);
+
+    if (!inviter) {
+      throw new UnauthorizedException('User not found');
+    }
+
+    // Only administrators can invite users
+    if (inviter.role !== UserRole.ADMIN) {
+      throw new ForbiddenException(
+        'Only administrators can invite users',
+      );
+    }
+
+    const email = inviteUserDto.email.trim().toLowerCase();
+
+    // Check whether the email already belongs to a user
+    const existingUser = await this.usersService.findByEmail(email);
+
+    if (existingUser) {
+      throw new ConflictException('Email already exists');
+    }
+
+    // Revoke an older pending invitation for this email
+    const previousInvitation = await this.invitationRepository.findOne({
+      where: {
+        email,
+        status: InvitationStatus.PENDING,
+      },
+    });
+
+    if (previousInvitation) {
+      previousInvitation.status = InvitationStatus.REVOKED;
+      await this.invitationRepository.save(previousInvitation);
+    }
+
+    // Generate secure invitation token
+    const invitationToken =
+      this.invitationHelper.generateInvitationToken();
+
+    const tokenHash =
+      this.invitationHelper.hashInvitationToken(invitationToken);
+
+    // Create invitation
+    const invitation = this.invitationRepository.create({
+      email,
+      tokenHash,
+      role: inviteUserDto.role ?? UserRole.USER,
+      status: InvitationStatus.PENDING,
+      invitedById: inviter.id,
+      expiresAt: this.invitationHelper.getInvitationExpiry(),
+    });
+
+    await this.invitationRepository.save(invitation);
+
+    // Send invitation email
+    await this.emailService.sendInvitationEmail(
+      email,
+      invitationToken,
+      `${inviter.firstName} ${inviter.lastName}`,
+      invitation.role,
+    );
+
+    return {
+      message: 'User invitation sent successfully',
+      data: {
+        invitationId: invitation.id,
+        email: invitation.email,
+        role: invitation.role,
+        expiresAt: invitation.expiresAt,
+      },
+    };
+  }
+
+  // Verify Invitation
+  async verifyInvitation(dto: VerifyInvitationDto) {
+    const tokenHash =
+      this.invitationHelper.hashInvitationToken(
+        dto.invitationToken,
+      );
+
+    const invitation = await this.invitationRepository
+      .createQueryBuilder('invitation')
+      .addSelect('invitation.tokenHash')
+      .where('invitation.email = :email', {
+        email: dto.email.trim().toLowerCase(),
+      })
+      .andWhere('invitation.tokenHash = :tokenHash', {
+        tokenHash,
+      })
+      .getOne();
+
+    if (
+      !invitation ||
+      invitation.status !== InvitationStatus.PENDING
+    ) {
+      throw new UnauthorizedException(
+        'Invalid or expired invitation',
+      );
+    }
+
+    if (
+      this.invitationHelper.isInvitationExpired(
+        invitation.expiresAt,
+      )
+    ) {
+      invitation.status = InvitationStatus.EXPIRED;
+      await this.invitationRepository.save(invitation);
+
+      throw new UnauthorizedException(
+        'Invitation has expired',
+      );
+    }
+
+    return {
+      message: 'Invitation verified successfully',
+      data: {
+        email: invitation.email,
+        role: invitation.role,
+        expiresAt: invitation.expiresAt,
+      },
+    };
+  }
+
+  // Accept Invitation and Create Account
+  async acceptInvitation(dto: AcceptInvitationDto) {
+    if (dto.password !== dto.confirmPassword) {
+      throw new BadRequestException(
+        'Password and confirm password do not match',
+      );
+    }
+
+    const tokenHash =
+      this.invitationHelper.hashInvitationToken(
+        dto.invitationToken,
+      );
+
+    const invitation = await this.invitationRepository
+      .createQueryBuilder('invitation')
+      .addSelect('invitation.tokenHash')
+      .where('invitation.tokenHash = :tokenHash', {
+        tokenHash,
+      })
+      .getOne();
+
+    if (
+      !invitation ||
+      invitation.status !== InvitationStatus.PENDING
+    ) {
+      throw new UnauthorizedException(
+        'Invalid or expired invitation',
+      );
+    }
+
+    if (
+      this.invitationHelper.isInvitationExpired(
+        invitation.expiresAt,
+      )
+    ) {
+      invitation.status = InvitationStatus.EXPIRED;
+      await this.invitationRepository.save(invitation);
+
+      throw new UnauthorizedException(
+        'Invitation has expired',
+      );
+    }
+
+    // Ensure the invited email has not already registered
+    const existingUser = await this.usersService.findByEmail(
+      invitation.email,
+    );
+
+    if (existingUser) {
+      throw new ConflictException('Email already exists');
+    }
+
+    // Hash password
+    const hashedPassword = await bcrypt.hash(dto.password, 12);
+
+    // Create active, verified account
+    const user = await this.usersService.create({
+      firstName: dto.firstName.trim(),
+      lastName: dto.lastName.trim(),
+      email: invitation.email,
+      password: hashedPassword,
+      phoneNumber: null,
+      role: invitation.role,
+      status: UserStatus.ACTIVE,
+      emailVerified: true,
+      emailVerificationOtpHash: null,
+      emailVerificationExpiresAt: null,
+    });
+
+    // Mark invitation as accepted
+    invitation.status = InvitationStatus.ACCEPTED;
+    invitation.acceptedById = user.id;
+    invitation.acceptedAt = new Date();
+
+    await this.invitationRepository.save(invitation);
+
+    return {
+      message: 'Invitation accepted successfully. Your account has been created.',
+      data: {
+        id: user.id,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        email: user.email,
+        role: user.role,
+        status: user.status,
+      },
+    };
+  }
+
 
 
   // logout

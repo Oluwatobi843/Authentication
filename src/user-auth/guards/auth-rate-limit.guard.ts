@@ -1,4 +1,3 @@
-
 import {
   CanActivate,
   ExecutionContext,
@@ -6,8 +5,6 @@ import {
   HttpStatus,
   Injectable,
 } from '@nestjs/common';
-
-// Per-process IP protection supplements persisted OTP/login limits.
 
 @Injectable()
 export class AuthRateLimitGuard implements CanActivate {
@@ -19,17 +16,22 @@ export class AuthRateLimitGuard implements CanActivate {
   canActivate(context: ExecutionContext): boolean {
     const request = context
       .switchToHttp()
-      .getRequest<{ ip?: string; socket: { remoteAddress?: string } }>();
+      .getRequest<{
+        ip?: string;
+        socket: { remoteAddress?: string };
+      }>();
 
     const now = Date.now();
 
+    // Remove expired rate-limit windows.
     for (const [key, value] of this.windows) {
       if (value.expiresAt <= now) {
         this.windows.delete(key);
       }
     }
 
-    const key = request.ip || request.socket.remoteAddress || 'unknown';
+    const key =
+      request.ip || request.socket.remoteAddress || 'unknown';
 
     const window = this.windows.get(key) || {
       count: 0,
