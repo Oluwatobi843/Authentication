@@ -2,7 +2,9 @@
 import 'reflect-metadata';
 import { config } from 'dotenv';
 import { DataSource } from 'typeorm';
+
 import { User } from '../user-auth/entities/user.entity.js';
+import { UserInvitation } from '../user-auth/entities/user-invitation.entity.js';
 
 config();
 
@@ -14,7 +16,7 @@ export default new DataSource({
   password: process.env.DB_PASSWORD,
   database: process.env.DB_NAME,
 
-  entities: [User],
+  entities: [User, UserInvitation],
 
   migrations: ['src/database/migrations/*.ts'],
 

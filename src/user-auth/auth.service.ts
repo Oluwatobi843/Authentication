@@ -1,3 +1,4 @@
+
 import {
   BadRequestException,
   ConflictException,
@@ -9,8 +10,16 @@ import {
 import * as bcrypt from 'bcrypt';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
+import { InjectRepository } from '@nestjs/typeorm';
 
-import { randomBytes, randomInt, createHash, timingSafeEqual } from 'crypto';
+import {
+  randomBytes,
+  randomInt,
+  createHash,
+  timingSafeEqual,
+} from 'node:crypto';
+
+import { Repository } from 'typeorm';
 
 import { LoginDto } from './dto/login.dto.js';
 import { RegisterDto } from './dto/register.dto.js';
@@ -20,39 +29,37 @@ import { RefreshTokenDto } from './dto/refresh-token.dto.js';
 import { ForgotPasswordDto } from './dto/forgot-password.dto.js';
 import { ResetPasswordDto } from './dto/reset-password.dto.js';
 
+import { InviteUserDto } from './dto/invite-user.dto.js';
+import { VerifyInvitationDto } from './dto/verify-invitation.dto.js';
+import { AcceptInvitationDto } from './dto/accept-invitation.dto.js';
+
 import { UsersService } from '../user-profile/users.service.js';
 import { EmailService } from '../common/email/email.service.js';
 
 import { UserRole } from './enums/user-role.enum.js';
 import { UserStatus } from './enums/user-status.enum.js';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { InvitationStatus } from './enums/invitation-status.enum.js';
 
 import { UserInvitation } from './entities/user-invitation.entity.js';
-import { InvitationStatus } from './enums/invitation-status.enum.js';
 
 import { InvitationHelper } from './helpers/invitation.helper.js';
 
-import { InviteUserDto } from './dto/invite-user.dto.js';
-import { VerifyInvitationDto } from './dto/verify-invitation.dto.js';
-import { AcceptInvitationDto } from './dto/accept-invitation.dto.js';
+import type { JwtPayload } from './interfaces/user.interface.js';
 
 @Injectable()
 export class AuthService {
   constructor(
-  private readonly usersService: UsersService,
-  private readonly emailService: EmailService,
-  private readonly jwtService: JwtService,
-  private readonly configService: ConfigService,
-  private readonly invitationHelper: InvitationHelper,
+    private readonly usersService: UsersService,
+    private readonly emailService: EmailService,
+    private readonly jwtService: JwtService,
+    private readonly configService: ConfigService,
+    private readonly invitationHelper: InvitationHelper,
 
-  @InjectRepository(UserInvitation)
-  private readonly invitationRepository: Repository<UserInvitation>,
-) {}
+    @InjectRepository(UserInvitation)
+    private readonly invitationRepository: Repository<UserInvitation>,
+  ) {}
 
-
-
-//  Register
+  // Register
 
   async register(registerDto: RegisterDto) {
     const existingUser = await this.usersService.findByEmail(
@@ -68,20 +75,16 @@ export class AuthService {
       12,
     );
 
-    // Generate a secure six-digit OTP
     const verificationOtp = randomInt(100000, 1000000).toString();
 
-    // Hash OTP before storing it
     const hashedOtp = createHash('sha256')
       .update(verificationOtp)
       .digest('hex');
 
-    // OTP expires after 10 minutes
     const verificationExpiresAt = new Date(
       Date.now() + 10 * 60 * 1000,
     );
 
-    // Create user
     const user = await this.usersService.create({
       firstName: registerDto.firstName,
       lastName: registerDto.lastName,
@@ -95,7 +98,6 @@ export class AuthService {
       emailVerificationExpiresAt: verificationExpiresAt,
     });
 
-    // Send OTP to user's email
     await this.emailService.sendVerificationEmail(
       user.email,
       verificationOtp,
@@ -113,10 +115,9 @@ export class AuthService {
     };
   }
 
-// Verification Email with OTP
+  // Verify Email with OTP
 
   async verifyEmail(verifyOtpDto: VerifyOtpDto) {
-    // Find user and explicitly retrieve the hidden OTP hash
     const user = await this.usersService.findByEmailWithVerificationOtp(
       verifyOtpDto.email,
     );
@@ -129,7 +130,6 @@ export class AuthService {
       throw new ConflictException('Email already verified');
     }
 
-    // Check OTP expiration
     if (
       !user.emailVerificationExpiresAt ||
       user.emailVerificationExpiresAt.getTime() <= Date.now()
@@ -144,12 +144,10 @@ export class AuthService {
       throw new ConflictException('Invalid or expired OTP');
     }
 
-    // Hash submitted OTP
     const submittedOtpHash = createHash('sha256')
       .update(verifyOtpDto.otp)
       .digest('hex');
 
-    // Compare hashes safely
     const storedHash = Buffer.from(
       user.emailVerificationOtpHash,
       'hex',
@@ -164,11 +162,9 @@ export class AuthService {
       throw new ConflictException('Invalid or expired OTP');
     }
 
-    // Activate account
     user.emailVerified = true;
     user.status = UserStatus.ACTIVE;
 
-    // Clear OTP after successful verification
     user.emailVerificationOtpHash = null;
     user.emailVerificationExpiresAt = null;
 
@@ -179,7 +175,7 @@ export class AuthService {
     };
   }
 
-//  Resend Verification OTP
+  // Resend Verification OTP
 
   async resendVerificationEmail(resendOtpDto: ResendOtpDto) {
     const user = await this.usersService.findByEmail(
@@ -198,15 +194,12 @@ export class AuthService {
       );
     }
 
-    // Generate a fresh six-digit OTP
     const verificationOtp = randomInt(100000, 1000000).toString();
 
-    // Hash OTP before storing it
     const hashedOtp = createHash('sha256')
       .update(verificationOtp)
       .digest('hex');
 
-    // OTP expires after 10 minutes
     const verificationExpiresAt = new Date(
       Date.now() + 10 * 60 * 1000,
     );
@@ -216,7 +209,6 @@ export class AuthService {
 
     await this.usersService.update(user);
 
-    // Send new OTP
     await this.emailService.sendVerificationEmail(
       user.email,
       verificationOtp,
@@ -227,7 +219,7 @@ export class AuthService {
     };
   }
 
-//  Login
+  // Login
 
   async login(loginDto: LoginDto) {
     const user = await this.usersService.findByEmailWithPassword(
@@ -253,40 +245,71 @@ export class AuthService {
       );
     }
 
-    const payload = {
+    // Access token payload
+    const accessPayload: JwtPayload = {
       sub: user.id,
       email: user.email,
       role: user.role,
+      type: 'access',
     };
 
-    const accessToken = await this.jwtService.signAsync(payload, {
-      secret: this.configService.getOrThrow<string>(
-        'ACCESS_TOKEN_SECRET',
-      ),
-      expiresIn: this.configService.getOrThrow<string>(
-        'ACCESS_TOKEN_EXPIRES_IN',
-      ) as `${number}${'s' | 'm' | 'h' | 'd'}`,
-    });
+    // Refresh token payload
+    const refreshPayload: JwtPayload = {
+      sub: user.id,
+      email: user.email,
+      role: user.role,
+      type: 'refresh',
+    };
 
-    const refreshToken = await this.jwtService.signAsync(payload, {
-      secret: this.configService.getOrThrow<string>(
-        'REFRESH_TOKEN_SECRET',
-      ),
-      expiresIn: this.configService.getOrThrow<string>(
-        'REFRESH_TOKEN_EXPIRES_IN',
-      ) as `${number}${'s' | 'm' | 'h' | 'd'}`,
-    });
+    const accessToken = await this.jwtService.signAsync(
+      accessPayload,
+      {
+        secret: this.configService.getOrThrow<string>(
+          'ACCESS_TOKEN_SECRET',
+        ),
+        expiresIn: this.configService.getOrThrow<string>(
+          'ACCESS_TOKEN_EXPIRES_IN',
+        ) as `${number}${'s' | 'm' | 'h' | 'd'}`,
+      },
+    );
+
+    const refreshToken = await this.jwtService.signAsync(
+      refreshPayload,
+      {
+        secret: this.configService.getOrThrow<string>(
+          'REFRESH_TOKEN_SECRET',
+        ),
+        expiresIn: this.configService.getOrThrow<string>(
+          'REFRESH_TOKEN_EXPIRES_IN',
+        ) as `${number}${'s' | 'm' | 'h' | 'd'}`,
+      },
+    );
 
     const refreshTokenHash = createHash('sha256')
       .update(refreshToken)
       .digest('hex');
 
-    const refreshTokenExpiresAt = new Date(
-      Date.now() + 7 * 24 * 60 * 60 * 1000,
-    );
+    // Read the actual expiration from the signed refresh token
+    const decodedRefreshToken =
+      await this.jwtService.verifyAsync<JwtPayload>(
+        refreshToken,
+        {
+          secret: this.configService.getOrThrow<string>(
+            'REFRESH_TOKEN_SECRET',
+          ),
+        },
+      );
+
+    if (typeof decodedRefreshToken.exp !== 'number') {
+      throw new UnauthorizedException(
+        'Unable to determine refresh token expiration',
+      );
+    }
 
     user.refreshTokenHash = refreshTokenHash;
-    user.refreshTokenExpiresAt = refreshTokenExpiresAt;
+    user.refreshTokenExpiresAt = new Date(
+      decodedRefreshToken.exp * 1000,
+    );
 
     await this.usersService.update(user);
 
@@ -307,27 +330,37 @@ export class AuthService {
     };
   }
 
-// Refresh Token
+  // Refresh Token
 
   async refresh(refreshTokenDto: RefreshTokenDto) {
     const refreshToken = refreshTokenDto.refreshToken;
 
-    let payload: {
-      sub: string;
-      email: string;
-      role: UserRole;
-      exp?: number;
-    };
+    let payload: JwtPayload;
 
     try {
-      payload = await this.jwtService.verifyAsync(refreshToken, {
-        secret: this.configService.getOrThrow<string>(
-          'REFRESH_TOKEN_SECRET',
-        ),
-      });
+      payload = await this.jwtService.verifyAsync<JwtPayload>(
+        refreshToken,
+        {
+          secret: this.configService.getOrThrow<string>(
+            'REFRESH_TOKEN_SECRET',
+          ),
+        },
+      );
     } catch {
       throw new UnauthorizedException(
         'Invalid or expired refresh token',
+      );
+    }
+
+    // Ensure this is actually a refresh token
+    if (
+      payload.type !== 'refresh' ||
+      !payload.sub ||
+      !payload.email ||
+      !payload.role
+    ) {
+      throw new UnauthorizedException(
+        'Invalid refresh token',
       );
     }
 
@@ -353,7 +386,7 @@ export class AuthService {
     if (
       !user.refreshTokenHash ||
       !user.refreshTokenExpiresAt ||
-      user.refreshTokenExpiresAt.getTime() < Date.now()
+      user.refreshTokenExpiresAt.getTime() <= Date.now()
     ) {
       throw new UnauthorizedException(
         'Invalid or expired refresh token',
@@ -376,14 +409,23 @@ export class AuthService {
       );
     }
 
-    const newPayload = {
+    // Generate separate payloads for the new tokens
+    const newAccessPayload: JwtPayload = {
       sub: user.id,
       email: user.email,
       role: user.role,
+      type: 'access',
+    };
+
+    const newRefreshPayload: JwtPayload = {
+      sub: user.id,
+      email: user.email,
+      role: user.role,
+      type: 'refresh',
     };
 
     const accessToken = await this.jwtService.signAsync(
-      newPayload,
+      newAccessPayload,
       {
         secret: this.configService.getOrThrow<string>(
           'ACCESS_TOKEN_SECRET',
@@ -395,7 +437,7 @@ export class AuthService {
     );
 
     const newRefreshToken = await this.jwtService.signAsync(
-      newPayload,
+      newRefreshPayload,
       {
         secret: this.configService.getOrThrow<string>(
           'REFRESH_TOKEN_SECRET',
@@ -406,18 +448,26 @@ export class AuthService {
       },
     );
 
+    // Hash and store the new refresh token
     user.refreshTokenHash = createHash('sha256')
       .update(newRefreshToken)
       .digest('hex');
 
-    const newTokenPayload = await this.jwtService.verifyAsync(
-      newRefreshToken,
-      {
-        secret: this.configService.getOrThrow<string>(
-          'REFRESH_TOKEN_SECRET',
-        ),
-      },
-    );
+    const newTokenPayload =
+      await this.jwtService.verifyAsync<JwtPayload>(
+        newRefreshToken,
+        {
+          secret: this.configService.getOrThrow<string>(
+            'REFRESH_TOKEN_SECRET',
+          ),
+        },
+      );
+
+    if (typeof newTokenPayload.exp !== 'number') {
+      throw new UnauthorizedException(
+        'Unable to determine refresh token expiration',
+      );
+    }
 
     user.refreshTokenExpiresAt = new Date(
       newTokenPayload.exp * 1000,
@@ -434,7 +484,7 @@ export class AuthService {
     };
   }
 
-// Forgot Password
+  // Forgot Password
 
   async forgotPassword(forgotPasswordDto: ForgotPasswordDto) {
     const user = await this.usersService.findByEmail(
@@ -470,7 +520,7 @@ export class AuthService {
     return successResponse;
   }
 
-// Reset Password
+  // Reset Password
 
   async resetPassword(resetPasswordDto: ResetPasswordDto) {
     const hashedToken = createHash('sha256')
@@ -518,17 +568,15 @@ export class AuthService {
     };
   }
 
-  
   // Invite User
+
   async inviteUser(inviterId: string, inviteUserDto: InviteUserDto) {
-    // Retrieve the user sending the invitation
     const inviter = await this.usersService.findById(inviterId);
 
     if (!inviter) {
       throw new UnauthorizedException('User not found');
     }
 
-    // Only administrators can invite users
     if (inviter.role !== UserRole.ADMIN) {
       throw new ForbiddenException(
         'Only administrators can invite users',
@@ -537,14 +585,12 @@ export class AuthService {
 
     const email = inviteUserDto.email.trim().toLowerCase();
 
-    // Check whether the email already belongs to a user
     const existingUser = await this.usersService.findByEmail(email);
 
     if (existingUser) {
       throw new ConflictException('Email already exists');
     }
 
-    // Revoke an older pending invitation for this email
     const previousInvitation = await this.invitationRepository.findOne({
       where: {
         email,
@@ -557,14 +603,12 @@ export class AuthService {
       await this.invitationRepository.save(previousInvitation);
     }
 
-    // Generate secure invitation token
     const invitationToken =
       this.invitationHelper.generateInvitationToken();
 
     const tokenHash =
       this.invitationHelper.hashInvitationToken(invitationToken);
 
-    // Create invitation
     const invitation = this.invitationRepository.create({
       email,
       tokenHash,
@@ -576,7 +620,6 @@ export class AuthService {
 
     await this.invitationRepository.save(invitation);
 
-    // Send invitation email
     await this.emailService.sendInvitationEmail(
       email,
       invitationToken,
@@ -596,6 +639,7 @@ export class AuthService {
   }
 
   // Verify Invitation
+
   async verifyInvitation(dto: VerifyInvitationDto) {
     const tokenHash =
       this.invitationHelper.hashInvitationToken(
@@ -646,6 +690,7 @@ export class AuthService {
   }
 
   // Accept Invitation and Create Account
+
   async acceptInvitation(dto: AcceptInvitationDto) {
     if (dto.password !== dto.confirmPassword) {
       throw new BadRequestException(
@@ -688,7 +733,6 @@ export class AuthService {
       );
     }
 
-    // Ensure the invited email has not already registered
     const existingUser = await this.usersService.findByEmail(
       invitation.email,
     );
@@ -697,10 +741,8 @@ export class AuthService {
       throw new ConflictException('Email already exists');
     }
 
-    // Hash password
     const hashedPassword = await bcrypt.hash(dto.password, 12);
 
-    // Create active, verified account
     const user = await this.usersService.create({
       firstName: dto.firstName.trim(),
       lastName: dto.lastName.trim(),
@@ -714,7 +756,6 @@ export class AuthService {
       emailVerificationExpiresAt: null,
     });
 
-    // Mark invitation as accepted
     invitation.status = InvitationStatus.ACCEPTED;
     invitation.acceptedById = user.id;
     invitation.acceptedAt = new Date();
@@ -734,10 +775,8 @@ export class AuthService {
     };
   }
 
+  // Logout
 
-
-  // logout
-  
   async logout(userId: string) {
     const user = await this.usersService.findById(userId);
 
