@@ -18,6 +18,7 @@ import {
 import { User } from '../user-auth/entities/user.entity.js';
 import type { UserResponse } from '../user-auth/interfaces/user.interface.js';
 import { EmailService } from '../common/email/email.service.js';
+import type { UserResponseMessage } from './interfaces/user-response-message.interface.js';
 
 import { UpdateProfileDto } from './dto/update-profile.dto.js';
 import { ChangePasswordDto } from './dto/change-password.dto.js';
@@ -195,7 +196,7 @@ export class UsersService {
   async requestEmailChange(
     userId: string,
     dto: ChangeProfileEmailDto,
-  ): Promise<{ message: string }> {
+  ): Promise<UserResponseMessage> {
     const user = await this.userRepository
       .createQueryBuilder('user')
       .addSelect('user.password')
