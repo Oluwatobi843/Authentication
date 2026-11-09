@@ -121,7 +121,7 @@ export class AuthService {
     const user = await this.usersService.findByEmailWithVerificationOtp(
       verifyOtpDto.email,
     );
-
+    
     if (!user) {
       throw new ConflictException('Invalid or expired OTP');
     }
